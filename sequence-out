@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sequence name="sequence-out" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
+    <property name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 00"/>
+    <call-template description="make log call" target="common-ct-logging-template">
+        <with-param name="MESSAGE_PARAM" value="ENTER sequence-out"/>
+    </call-template>
+    <!-- Log trace event -->
+    <call-template target="logging-template">
+        <with-param name="tracePoint" value="CT_API_CR"/>
+        <with-param name="subComponent" value="sequence-out"/>
+        <with-param name="logLevel" value="info"/>
+    </call-template>
+    <property description="CODE_LOC 01" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 01"/>
+    <!-- handle Error Codes -->
+    <filter regex="400|500" source="$axis2:HTTP_SC">
+        <then>
+            <call-template target="logging-template">
+                <with-param name="MESSAGE_PARAM" value="Handling error message from Backend"/>
+            </call-template>
+            <property name="ERROR_SOURCE" scope="default" type="STRING" value="Backend"/>
+            <property expression="$axis2:HTTP_SC" name="ERROR_CODE" scope="default" type="STRING"/>
+            <filter regex="true" source="boolean(//*[local-name()='StandardMessageFault'])">
+                <then>
+                    <property expression="//*[local-name()='faultText']" name="ERROR_MESSAGE" scope="default" type="STRING"/>
+                    <property expression="//*[local-name()='faultDetail']/*[local-name()='text']" name="ERROR_DETAIL" scope="default" type="STRING"/>
+                </then>
+                <else>
+                    <property expression="//*[local-name()='faultstring']" name="ERROR_MESSAGE" scope="default" type="STRING"/>
+                    <property expression="normalize-space(string(//*[local-name()='detail']/child::*))" name="ERROR_DETAIL" scope="default" type="STRING"/>
+                </else>
+            </filter>
+            <sequence key="sequence-error"/>
+        </then>
+        <else/>
+    </filter>
+    <!-- 02 evaluating response -->
+    <switch source="//*[local-name() = 'Status']" xmlns:ns="http://org.apache.synapse/xsd">
+        <case regex="OK">
+            <property description="CODE_LOC 02" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 02"/>
+            <property name="messageType" scope="axis2" type="STRING" value="application/xml"/>
+            <call-template target="logging-template">
+                <with-param name="tracePoint" value="CT_API_CS"/>
+                <with-param name="subComponent" value="sequence-out"/>
+                <with-param name="logLevel" value="info"/>
+            </call-template>
+            <!-- Calling Microservice to Validate and tranform XML Response. Add values according to APIsAsset/BOM -->
+            <call-template target="microservice-assets-template">
+                <with-param name="MICROSERVICE-NAME" value="microservice-soap2json"/>
+                <with-param name="INPUT-SYSTEM-NAME" value="{get-property('INPUT_SYSTEM_NAME')}"/>
+                <with-param name="INPUT-SERVICE-NAME" value="{get-property('INPUT_SERVICE_NAME')}"/>
+                <with-param name="INPUT-SERVICE-VERSION" value="{get-property('INPUT_SERVICE_VERSION')}"/>
+                <with-param name="OUTPUT-SYSTEM-NAME" value="{get-property('ETMP_OUTPUT_SYSTEM_NAME')}"/>
+                <with-param name="OUTPUT-SERVICE-NAME" value="{get-property('ETMP_OUTPUT_SERVICE_NAME')}"/>
+                <with-param name="OUTPUT-SERVICE-VERSION" value="{get-property('ETMP_OUTPUT_SERVICE_VERSION')}"/>
+                <with-param name="FLOW-DIRECTION" value="response"/>
+                <with-param name="SOURCE" value="service"/>
+                <with-param name="HTTP-ACCEPT" value="application/json"/>
+                <with-param name="CONTENT-ENCODING" value="deflate"/>
+            </call-template>
+            <!-- handle any micro-service validation error -->
+            <call-template target="logging-template">
+                <with-param name="tracePoint" value="CT_API_CR"/>
+                <with-param name="subComponent" value="sequence-out"/>
+                <with-param name="logLevel" value="info"/>
+            </call-template>
+            <filter regex="400|500" source="//*[local-name()='errorDetail']/*[local-name()='errorCode']">
+                <then>
+                    <property description="CODE_LOC 03" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 03"/>
+                    <call-template target="logging-template">
+                        <with-param name="MESSAGE_PARAM" value="Handling error response from response transformation"/>
+                    </call-template>
+                    <property name="ERROR_SOURCE" scope="default" type="STRING" value="ct-api"/>
+                    <property expression="//*[local-name()='errorDetail']/*[local-name()='errorCode']" name="ERROR_CODE" scope="default" type="STRING"/>
+                    <property expression="//*[local-name()='errorDetail']/*[local-name()='errorMessage']" name="ERROR_MESSAGE" scope="default" type="STRING"/>
+                    <property expression="//*[local-name()='errorDetail']/*[local-name()='sourceFaultDetail']/*[local-name()='detail']" name="ERROR_DETAIL" scope="default" type="STRING"/>
+                    <property expression="$ctx:ERROR_CODE" name="HTTP_SC" scope="axis2" type="STRING"/>
+                    <sequence key="sequence-error"/>
+                </then>
+                <else/>
+            </filter>
+        </case>
+        <case regex="NOT_OK">
+            <property description="CODE_LOC 04" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 04"/>
+            <call-template target="logging-template">
+                <with-param name="MESSAGE_PARAM" value="Handling NOT_OK response form the backend"/>
+            </call-template>
+            <property name="ERROR_CODE" scope="default" type="STRING" value="400"/>
+            <property name="HTTP_SC" scope="axis2" type="STRING" value="400"/>
+            <property name="ERROR_SOURCE" scope="default" type="STRING" value="Backend"/>
+            <property expression="$ctx:RETURN_PARAMVALUE2" name="ERROR_MESSAGE" scope="default" type="STRING"/>
+            <property expression="//*[local-name() = 'ReturnParameters'][*[local-name() = 'ParamName'] = 'ERRORCODE']/*[local-name() = 'ParamValue']" name="RTN_ERRORCODE" scope="default" type="STRING"/>
+            <property expression="//*[local-name() = 'ReturnParameters'][*[local-name() = 'ParamName'] = 'ERRORTEXT']/*[local-name() = 'ParamValue']" name="RTN_ERRORTEXT" scope="default" type="STRING"/>
+            <property expression="$ctx:RTN_ERRORTEXT" name="ERROR_MESSAGE" scope="default" type="STRING"/>
+            <property expression="concat($ctx:RTN_ERRORCODE,' - ', $ctx:RTN_ERRORTEXT)" name="ERROR_DETAIL" scope="default" type="STRING"/>
+            <sequence key="sequence-error"/>
+        </case>
+        <default>
+            <property description="CODE_LOC 04" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 04"/>
+            <property name="ERROR_CODE" scope="default" type="STRING" value="500"/>
+            <property name="ERROR_SOURCE" scope="default" type="STRING" value="Backend"/>
+            <property name="ERROR_MESSAGE" scope="default" type="STRING" value="Invalid response from backend system"/>
+            <property name="ERROR_DETAIL" scope="default" type="STRING" value="Invalid response from backend system"/>
+            <sequence key="rest-error-handling-sequence"/>
+            <property name="HTTP_SC" scope="axis2" type="STRING" value="500"/>
+        </default>
+    </switch>
+    <call-template target="logging-template">
+        <with-param name="tracePoint" value="CT_API_SS"/>
+        <with-param name="subComponent" value="sequence-out"/>
+        <with-param name="logLevel" value="info"/>
+    </call-template>
+    <property description="CODE_LOC 99" name="CODE_LOC" scope="default" type="STRING" value="sequence-out step 99"/>
+    <!-- 99 SENDING THE RESPONSE -->
+    <property name="messageType" scope="axis2" type="STRING" value="application/json"/>
+    <property name="ContentType" scope="axis2" type="STRING" value="application/json; charset=UTF-8"/>
+    <call-template target="logging-template">
+        <with-param name="MESSAGE_PARAM" value="LEAVE sequence-out"/>
+    </call-template>
+    <respond/>
+</sequence>
