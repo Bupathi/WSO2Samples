@@ -6,7 +6,7 @@
     <property name="messageType" scope="axis2" type="STRING" value="application/json"/>
     <property name="ContentType" scope="axis2" type="STRING" value="application/json; charset=UTF-8"/>
     <sequence key="rest-error-handling-sequence"/>
-    <call-template target="common-ct-logging-template">
+    <call-template target="logging-template">
         <with-param name="MESSAGE_PARAM" value="LEAVE sequence-error"/>
     </call-template>
     <call-template target="logging-template">
